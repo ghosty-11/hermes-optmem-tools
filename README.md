@@ -88,17 +88,39 @@ platform_toolsets:
 a string here is silently ignored — as is `hermes tools enable`, which only knows built-in
 toolsets, not plugin-registered ones. Edit the profile's `config.yaml` for this one key.
 
-### Give the agent instructions that match
+### Install the skill — do not skip this
 
-Tell it, in its `AGENTS.md`/`SOUL.md`, to *call the tools* — and delete any older
-instruction to run `memo` on a command line, or it will keep trying to use a shell it
-doesn't have:
+Tools alone are not enough. A capable model will use them from a one-line hint; a
+small local model (we run gpt-oss:20b) will happily reply *"I'll remember that!"*
+and never emit the call — memory that silently never happens, which is worse than
+no memory at all, because it looks like it worked.
+
+`skill/SKILL.md` is the fix: worked examples of when to call, the `@handle: fact`
+format, and what must never be stored. Skills are injected as procedural guidance
+right where tool selection happens, and example-shaped instructions land far better
+on small models than prose rules buried in a persona file.
+
+```bash
+mkdir -p "$HERMES_HOME/profiles/<name>/skills/memory/optmem"
+cp skill/SKILL.md "$HERMES_HOME/profiles/<name>/skills/memory/optmem/SKILL.md"
+hermes -p <name> skills list | grep optmem     # should show: enabled
+```
+
+Then **delete any older memory prose** from the profile's `AGENTS.md`/`SOUL.md` —
+especially instructions to run `memo` on a command line, which it will keep trying
+with a shell it doesn't have. Leave a short pointer instead; duplication between the
+skill and the persona file just costs context and dilutes both:
 
 ```markdown
-Your memory is the optmem tools. Call `optmem_wake` before your first reply in a session.
-Call `optmem_note` whenever you learn something worth keeping, written as `@handle: fact`.
-Use `optmem_recall` to pull back what you know about someone before replying to them.
+You have permanent memory through your tools: `optmem_wake` at the start of a session,
+`optmem_note` when someone tells you something (written `@handle: fact`), `optmem_recall`
+before replying to someone you know. Calling the tool is the only thing that remembers.
+Your `optmem` skill has the details.
 ```
+
+Two settings matter alongside it: `agent.max_turns` must leave room for a tool call
+plus a reply (4 is too tight — we use 15), and the shorter the surrounding prompt,
+the more reliably a small model reaches for a tool at all.
 
 ## Notes
 
