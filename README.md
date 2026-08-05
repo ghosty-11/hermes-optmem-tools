@@ -143,6 +143,21 @@ Two settings matter alongside it: `agent.max_turns` must leave room for a tool c
 plus a reply (4 is too tight — we use 15), and the shorter the surrounding prompt,
 the more reliably a small model reaches for a tool at all.
 
+## Key memories on stable identity, not display names
+
+Chat platforms hand the model a *display name*. People change those, and two
+people can share one — so notes keyed on a display name eventually merge two
+strangers or lose someone after a rename. Worse, a single-user framing ("the
+user likes X") is meaningless in a room with fifty people.
+
+The skill therefore writes `@handle id:<number>: fact`. On Discord, the
+companion plugin
+[hermes-discord-ambient](https://github.com/ghosty-11/hermes-discord-ambient)
+supplies that identity with `speaker_identity: true`, which prefixes each
+dispatched message with `[speaker @handle id:123]` — the account handle and
+numeric id, neither of which reaches the model otherwise. Without it, an agent
+asked to "record the user id" simply cannot: the id is not in anything it sees.
+
 ## Notes
 
 - One agent = one `MEMORY_DIR` = one identity. OptMem's own README is explicit that

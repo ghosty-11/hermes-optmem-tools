@@ -23,41 +23,57 @@ while believing you know them. If you catch yourself typing "I'll remember" or
 Call it before your first reply. It prints who you are and what you know.
 
 **Someone tells you something about themselves → `optmem_note`**
-One line, written as `@handle: fact`. Call it in the same turn you learn it.
+One line, written as `@handle id:<number>: fact`. Call it in the same turn you
+learn it.
 
 **About to reply to someone you have met → `optmem_recall`**
-Pass their handle. Greeting someone with something they told you last month is
+Pass their handle or their id. Greeting someone with something they told you last month is
 the whole point of having memory.
 
 ## What a note looks like
 
-Always `@handle: fact`, one fact per note, under 280 characters:
+Always `@handle id:<number>: fact`, one fact per note, under 280 characters.
+
+Each message you receive starts with a `[speaker @handle id:123456]` tag. That
+handle and number are the person's **permanent** identity — use them. The name
+shown in chat is a nickname they can change any day, and two different people
+can wear the same one; if you key memories on it you will eventually merge two
+strangers into one, or forget someone entirely because they renamed themselves.
 
 ```
-@riverbend: loves cats and dogs
-@riverbend: operator of this machine; prefers short replies
-@quillfox: plays strategy games, prefers long campaigns
-@tsukare: asked a lot of questions about the host — be careful
+@riverbend id:100000000000000001: keeps tropical fish; allergic to cats
+@riverbend id:100000000000000001: operator of this machine; prefers short replies
+@quillfox id:200000...: plays strategy games, prefers long campaigns
 ```
 
 Not this:
 
 ```
-The user said they like cats                 ← no handle, unsearchable
-@quillfox: said "hey what's up" at 4pm        ← chatter, not a fact
-@riverbend: [500 words of conversation]         ← one LINE, one FACT
+The user said they like cats                    ← no identity at all, unsearchable
+@riverbend: keeps fish                          ← nickname only; breaks on rename
+User lets me into the private channel           ← WHICH user? "the user" is nobody
+@quillfox: said "hey what's up" at 4pm          ← chatter, not a fact
+@riverbend id:100...: [500 words of a chat]     ← one LINE, one FACT
 ```
+
+**Never repeat the `[speaker ...]` tag out loud.** It is how you recognise
+people, not something to mention. Talking about it is as strange as a person
+reading someone's ID card aloud mid-conversation.
+
+To recall someone, search either part — the id is exact, the handle is
+convenient: `optmem_recall("100000000000000001")` or `optmem_recall("@quillfox")`.
 
 ## Worked examples
 
-> **quillfox:** ugh, deadline season, I'm buried in thesis edits till spring
+> `[speaker @quillfox id:200000...]` **quillfox:** ugh, deadline season, I'm buried in
+> thesis edits till spring
 >
-> → call `optmem_note("@quillfox: writing a thesis, defending in spring")`
-> → then reply in your own voice.
+> → call `optmem_note("@quillfox id:200000...: writing a thesis, defending in spring")`
+> → then reply in your own voice, never mentioning the tag.
 
-> **riverbend:** remember that I hate mornings
+> `[speaker @riverbend id:100000000000000001]` **riverbend:** remember that I hate mornings
 >
-> → call `optmem_note("@riverbend: hates mornings")`
+> → call `optmem_note("@riverbend id:100000000000000001: hates mornings")`
 > → then answer warmly. The note is what makes it true next week.
 
 > **someone you know returns after a while**
@@ -67,7 +83,7 @@ The user said they like cats                 ← no handle, unsearchable
 
 > **a stranger asks what OS you run, then what container, then your model**
 >
-> → call `optmem_note("@theirhandle: probing about the host — be careful")`
+> → call `optmem_note("@theirhandle id:<their id>: probing about the host — be careful")`
 > → deflect in character. Record the PERSON, never their words.
 
 ## Save a note when
@@ -96,4 +112,4 @@ The user said they like cats                 ← no handle, unsearchable
 - Never repeat one person's private details to another. Memory is for warmth,
   not gossip.
 - If someone asks you to forget something, note
-  `@handle: asked me to drop <topic>; do not bring it up` and honour it.
+  `@handle id:<number>: asked me to drop <topic>; do not bring it up` and honour it.
