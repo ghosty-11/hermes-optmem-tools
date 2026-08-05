@@ -1,6 +1,6 @@
 name: optmem-tools
 label: OptMem (memory tools)
-kind: tools
+kind: standalone
 version: 1.0.0
 description: >
   Exposes OptMem (github.com/VictorTaelin/OptMem) as registered tools —

@@ -59,6 +59,12 @@ hermes plugins enable optmem-tools
 sudo systemctl restart hermes-gateway     # plugins load at startup
 ```
 
+`plugin.yaml` declares `kind: standalone` — that is the kind for a plugin that
+registers tools. There is **no** `kind: tools`; an invalid kind is demoted to
+standalone with only a WARNING in the gateway log, and `register()` never runs, so
+the tools silently never appear. If the tools don't show up, grep the gateway log
+for your plugin name before debugging anything else.
+
 ## Config
 
 Per profile, in that profile's `config.yaml`:
