@@ -76,6 +76,27 @@ optmem:
   wake_lines: 48                                      # optional, passed to `wake`
 ```
 
+### Disable the built-in memory first — do not run both
+
+Hermes ships its own `memory` toolset. If you leave it enabled alongside these tools the
+agent has **two** memory systems and will quietly pick one per turn — ours picked the
+built-in one, wrote to `profiles/<name>/memories/MEMORY.md`, and told the operator it had
+saved. We checked OptMem's log, found it empty, and accused the agent of fabricating a
+memory it had genuinely written. It had not lied; we had looked in the wrong store.
+
+So: remove `memory` from the profile's `toolsets` / `platform_toolsets` (and set
+`memory.memory_enabled: false` if nothing else needs it), leaving `optmem` as the single
+memory system. Migrate anything already written:
+
+```bash
+grep -v '^§' "$HERMES_HOME/profiles/<name>/memories/MEMORY.md" | while read -r line; do
+  MEMORY_DIR=<memory_dir> /path/to/memo note "$line"
+done
+```
+
+> If an agent claims it saved something and the store looks empty, check **every** store
+> before disbelieving it. An agent with two memory tools will use the one you didn't check.
+
 Then add `optmem` to the profile's toolsets. If the profile scopes tools per surface, add
 it to `platform_toolsets.<surface>` too:
 
