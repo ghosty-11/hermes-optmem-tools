@@ -73,8 +73,21 @@ Per profile, in that profile's `config.yaml`:
 optmem:
   memory_dir: /var/lib/hermes/<agent>-memory/memory   # required — also enables the tools
   binary: /var/lib/hermes/.optmem/memo                # optional (this is the default)
-  wake_lines: 48                                      # optional, passed to `wake`
+  wake_lines: 48                                      # optional; caps the wake OUTPUT (see note)
 ```
+
+### `wake_lines` caps the output, and deliberately does not reach the binary
+
+OptMem's `wake [N]` argument selects **part N** of a segmented memory — it is not a line
+count. Passing a value like `48` therefore asks for a part that does not exist and the call
+fails with `No part 48: the memory has 1 part`, returning nothing on the one call that is
+supposed to establish what the agent knows. Worse, nothing about it looks broken: the tool
+reports the error, the agent carries on, and the memory simply never arrives.
+
+This plugin used to forward the value and hit exactly that. It now runs a bare `wake` and
+applies `wake_lines` to the output itself, keeping the most recent lines — the log is
+append-only and chronological, so the tail is the current picture. That does what the
+option's name promises, bounds the tokens a wake costs, and cannot fail.
 
 ### Disable the built-in memory first — do not run both
 

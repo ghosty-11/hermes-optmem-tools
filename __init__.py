@@ -139,14 +139,36 @@ def _run(args: list[str]) -> str:
 
 # ---- handlers -------------------------------------------------------------
 def _handle_wake(args: dict, **_: Any) -> str:
-    cmd = ["wake"]
+    """Load the standing context.
+
+    `wake_lines` is applied HERE, to the output — it is not passed to the binary.
+    OptMem's `wake [N]` argument selects **part N** of a segmented memory, not a
+    line count, so forwarding a value like 48 asks for a part that does not exist
+    and the call fails with `No part 48: the memory has 1 part` — returning
+    nothing, on the one call that is supposed to establish what the agent knows.
+    Nothing surfaces: the tool reports the error text, the agent carries on, and
+    the memory simply never arrives.
+
+    Capping the output ourselves does what the option's name promises and what it
+    was configured for (bounding the tokens a wake costs), and it cannot fail.
+    """
+    out = _run(["wake"])
     lines = _cfg().get("wake_lines")
-    if lines:
-        try:
-            cmd.append(str(int(lines)))
-        except (TypeError, ValueError):
-            pass
-    return _run(cmd)
+    if not lines:
+        return out
+    try:
+        limit = int(lines)
+    except (TypeError, ValueError):
+        return out
+    if limit <= 0:
+        return out
+    rows = out.splitlines()
+    if len(rows) <= limit:
+        return out
+    # Keep the MOST RECENT lines: OptMem's log is append-only and chronological,
+    # so the tail is the current picture. Truncating the head would hand the agent
+    # the oldest facts and drop everything learned since.
+    return "\n".join(rows[-limit:])
 
 
 def _handle_note(args: dict, **_: Any) -> str:
