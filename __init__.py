@@ -208,10 +208,38 @@ def _wake_output() -> str:
     return "\n".join(rows[-limit:])
 
 
+# A Discord id is digits. People-notes here are written `@handle id:<digits>: fact`,
+# and the model has repeatedly written the PLACEHOLDER instead of the number — notes
+# containing the literal string `id:<number>` were found in her store. That is silent
+# corruption: the note looks right, recall matches nothing, and nobody notices, because a
+# memory that never matches is indistinguishable from a memory nobody needed.
+# Decision O1 (operator, 2026-08-09): reject it at write time.
+#
+# A regex, not an ontology — rung 3, not rung 5. It converts a class of silent corruption
+# into an impossible state, costs no inference, and fixes a defect we observed rather than
+# one we imagined.
+#
+# Deliberately narrow: a note with NO id is fine and always was. Only a PRESENT-and-
+# malformed id is refused, so this cannot block ordinary notes.
+_ID_TOKEN = re.compile(r"\bid:\s*([^\s,;]+)", re.I)
+
+
+def _malformed_ids(text: str) -> list[str]:
+    return [m.group(1) for m in _ID_TOKEN.finditer(text)
+            if not m.group(1).strip("<>[]().,;:").isdigit()]
+
+
 def _handle_note(args: dict, **_: Any) -> str:
     text = str(args.get("text") or "").strip()
     if not text:
         return "optmem_note: 'text' is required."
+    bad = _malformed_ids(text)
+    if bad:
+        # Say what to do, not only what went wrong: a refusal the model cannot act on
+        # becomes a retry loop with the same value.
+        return ("optmem_note: refused — `id:` must be the person's numeric Discord id, "
+                f"not {bad[0]!r}. Use the real numeric id (e.g. `id:123456789012345678`), or "
+                "leave `id:` out entirely if you do not have it. Nothing was written.")
     # OptMem's unit is ONE line: collapse whitespace so a pasted block cannot
     # corrupt the append-only log, then cap length.
     text = " ".join(text.split())
