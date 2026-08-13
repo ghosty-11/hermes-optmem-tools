@@ -1,5 +1,7 @@
 # hermes-optmem-tools
 
+[![Support this work](https://img.shields.io/badge/Support-EVM-6f42c1?logo=ethereum&logoColor=white)](#support-development)
+
 A [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that gives an agent
 [OptMem](https://github.com/VictorTaelin/OptMem) — permanent, append-only memory — as
 **registered tools**, so it never needs shell access to remember anything.
@@ -181,6 +183,16 @@ asked to "record the user id" simply cannot: the id is not in anything it sees.
   — ambient presence, reactions, bot-loop breaker and slash-command policy for a Discord
   persona bot. The two were built for the same deployment: a public community chatbot that
   should feel present and remember people, while holding no dangerous capability at all.
+
+## Support development
+
+If this plugin saves you time, you can support continued development with an EVM donation:
+
+```text
+0x9600c9bc632175941608a1b551cb0f018f0f40b4
+```
+
+Networks: Ethereum, Base, Polygon, and other EVM-compatible networks. Verify the address and selected network before sending; unsupported assets or networks may be unrecoverable.
 
 ## License
 
