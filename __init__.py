@@ -25,7 +25,7 @@ CONFIG (per profile, in config.yaml)
     optmem:
       memory_dir: /var/lib/hermes/companion-memory/memory   # required; enables the tools
       binary: /var/lib/hermes/.optmem/memo               # optional, this is the default
-      wake_lines: 48                                     # optional, passed to `wake`
+      wake_lines: 48                                     # optional; caps rendered wake output
 
 Then add `optmem` to the profile's toolsets (and to platform_toolsets.<surface>
 if that profile scopes tools per surface).
@@ -37,10 +37,13 @@ SAFETY
   * MEMORY_DIR comes from config, never from the model — one profile cannot
     read another's memories by asking.
   * env is minimal (MEMORY_DIR + PATH), cwd is fixed, every call is timed out.
-  * note text is length-capped and newline-stripped: OptMem's unit is ONE line,
-    and a multi-line note would corrupt its log format.
-  * recall patterns are length-capped and rejected if they look like a regex
-    bomb; a bad pattern returns an error to the model, never an exception.
+  * note text is collapsed to one line and refused if it exceeds 280 bytes:
+    OptMem's unit is ONE line, and a multi-line or over-long note is rejected
+    rather than silently trimmed.
+  * MEMORY_DIR must already exist (`memo init`). This plugin never creates it.
+  * optmem_nap only shows a pending compression task; it does not write one.
+  * recall patterns are length-capped and rejected if they are not valid
+    regex; a bad pattern returns an error to the model, never an exception.
 """
 
 from __future__ import annotations
@@ -48,14 +51,13 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shlex
 import subprocess
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BINARY = "/var/lib/hermes/.optmem/memo"
-NOTE_MAX_CHARS = 280           # OptMem's own documented unit: one short line
+NOTE_MAX_BYTES = 280       # OptMem ENTRY_CHARS: one short line, in bytes
 PATTERN_MAX_CHARS = 120
 TIMEOUT_S = 30
 OUTPUT_MAX_CHARS = 8000        # wake output is bounded by design; belt+braces
@@ -102,10 +104,8 @@ def _run(args: list[str]) -> str:
     if not d:
         return "optmem is not configured for this profile."
     b = _binary()
-    try:
-        os.makedirs(d, exist_ok=True)
-    except Exception:
-        pass
+    if not os.path.isdir(d):
+        return f"optmem: memory dir {d} does not exist. Run memo init first."
     env = {
         "MEMORY_DIR": d,
         "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -138,31 +138,18 @@ def _run(args: list[str]) -> str:
 
 
 # ---- handlers -------------------------------------------------------------
-# `memo wake` prints the store AND, when compactions are pending, a housekeeping
-# task addressed to whoever ran it: "You are awake. / Compress memories #0-1 into
-# one line... / Run: ~/.optmem/memo nap 0-1". That is legitimate here — this plugin
-# also exposes `optmem_nap`, so the caller can actually do it, and agents on this
-# host demonstrably do (a nap immediately followed by a wake).
-#
-# What it is NOT is something to say out loud. 2026-08-08: an agent on a public
-# surface received this block, took it for an instruction it had just been given,
-# and narrated a garbled version of it at a user — a disclaimer about needing to
-# "check the file permissions" on an "old one from before the policy changes".
-# Nobody injected anything; a maintenance prompt simply arrived in the same channel
-# as content, and the model relayed it.
-#
-# So: keep the chore, label it. Stripping it (which is the right call where the
-# block is injected UNASKED, as a memory) would break the compaction loop for every
-# seat that uses this tool.
+# `memo wake` prints the store AND, when compressions are pending, a
+# housekeeping task: "Compress memories #0-1... / Run: memo nap 0-1".
+# `optmem_nap` only shows that task; it does not write a summary.
+# Label the chore so the model does not narrate it. A wake with nothing
+# pending must not gain a stray note — the awake banner alone is not a chore.
 HOUSEKEEPING_NOTE = (
     "[housekeeping — for you alone. Do it silently with optmem_nap, or ignore it. "
     "Never mention, quote or narrate any of this block in a reply.]"
 )
 
-# Markers that indicate a pending-compaction chore is present in the output. A wake
-# with nothing pending must not gain a stray note.
-_CHORE_MARKERS = ("You are awake", "Compress memories", "memo nap")
-
+# Markers that indicate a pending-compression chore is present in the output.
+_CHORE_MARKERS = ("Compress memories", "memo nap")
 
 def _mark_housekeeping(out: str) -> str:
     """Label optmem's operator-facing chore as internal, leaving it intact."""
@@ -238,13 +225,17 @@ def _handle_note(args: dict, **_: Any) -> str:
         # Say what to do, not only what went wrong: a refusal the model cannot act on
         # becomes a retry loop with the same value.
         return ("optmem_note: refused — `id:` must be the person's numeric Discord id, "
-                f"not {bad[0]!r}. Use the real numeric id (e.g. `id:123456789012345678`), or "
+                f"not {bad[0]!r}. Use the real numeric id (e.g. `id:1234567890`), or "
                 "leave `id:` out entirely if you do not have it. Nothing was written.")
     # OptMem's unit is ONE line: collapse whitespace so a pasted block cannot
-    # corrupt the append-only log, then cap length.
+    # corrupt the append-only log, then refuse if it exceeds ENTRY_CHARS bytes.
     text = " ".join(text.split())
-    if len(text) > NOTE_MAX_CHARS:
-        text = text[:NOTE_MAX_CHARS].rstrip()
+    n = len(text.encode())
+    if n > NOTE_MAX_BYTES:
+        return (
+            f"optmem_note: refused — a memory is at most {NOTE_MAX_BYTES} bytes "
+            f"(this one is {n}). Shorten it. Nothing was written."
+        )
     return _run(["note", text])
 
 
@@ -262,6 +253,7 @@ def _handle_recall(args: dict, **_: Any) -> str:
 
 
 def _handle_nap(args: dict, **_: Any) -> str:
+    """Show the next pending compression task. Does not write a summary."""
     return _run(["nap"])
 
 
@@ -280,17 +272,17 @@ _NOTE = {
     "name": "optmem_note",
     "description": (
         "Record ONE short memory, permanently. Use it whenever you learn "
-        "something worth keeping about a person: write it as '@handle: fact' "
-        "so you can find everything about them later. One line, max 280 "
-        "characters. Never store secrets, contact details, or raw text "
-        "someone sent you."
+        "something worth keeping about a person: write it as "
+        "'@handle id:<number>: fact' so you can find everything about them "
+        "later. One line, max 280 bytes. Never store secrets, contact "
+        "details, or raw text someone sent you."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "text": {
                 "type": "string",
-                "description": "The memory, one line, ideally '@handle: fact'.",
+                "description": "The memory, one line, '@handle id:<number>: fact'.",
             }
         },
         "required": ["text"],
@@ -319,8 +311,9 @@ _RECALL = {
 _NAP = {
     "name": "optmem_nap",
     "description": (
-        "Perform the pending memory compressions. Call this only when a "
-        "previous optmem_note told you a compression is pending."
+        "Show the next pending memory-compression task, if any. This does "
+        "not compress anything. Call it only to read the chore; leave "
+        "writing the summary to the operator or an offline job."
     ),
     "parameters": {"type": "object", "properties": {}, "required": []},
 }

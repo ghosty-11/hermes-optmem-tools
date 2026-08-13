@@ -33,7 +33,7 @@ Registers four tools under an `optmem` toolset:
 | `optmem_wake` | Load memory at session start — who you are, who these people are |
 | `optmem_note` | Record ONE short line, permanently |
 | `optmem_recall` | Search every memory ever recorded (e.g. a handle) |
-| `optmem_nap` | Perform pending compressions when a note asks for one |
+| `optmem_nap` | Show a pending compression task — it does not write one |
 
 The plugin runs the binary itself with a **fixed argv** and the profile's own
 `MEMORY_DIR`. The model supplies only a note string or a search pattern — never a command,
@@ -47,7 +47,7 @@ flag, or path. No shell is involved (`shell=False`, explicit argv).
   resolved per profile automatically.
 - **Minimal env, fixed cwd, hard timeout** on every call.
 - **Notes are sanitized**: whitespace collapsed to one line (OptMem's unit is one line — a
-  pasted block would corrupt the append-only log) and capped at 280 characters.
+  pasted block would corrupt the append-only log) and refused if they exceed 280 bytes.
 - **Patterns are validated**: length-capped and compiled before use; a bad pattern returns
   an error to the model instead of raising.
 - **Invisible when unconfigured.** A `check_fn` hides all four tools from profiles with no
@@ -87,9 +87,9 @@ supposed to establish what the agent knows. Worse, nothing about it looks broken
 reports the error, the agent carries on, and the memory simply never arrives.
 
 This plugin used to forward the value and hit exactly that. It now runs a bare `wake` and
-applies `wake_lines` to the output itself, keeping the most recent lines — the log is
-append-only and chronological, so the tail is the current picture. That does what the
-option's name promises, bounds the tokens a wake costs, and cannot fail.
+applies `wake_lines` to the already-rendered output, keeping the most recent lines of
+that document. Memo already budgets the cover via its own `WAKE_LINES`; this option only
+caps what the tool returns.
 
 ### Disable the built-in memory first — do not run both
 
@@ -131,8 +131,8 @@ small local model (we run gpt-oss:20b) will happily reply *"I'll remember that!"
 and never emit the call — memory that silently never happens, which is worse than
 no memory at all, because it looks like it worked.
 
-`skill/SKILL.md` is the fix: worked examples of when to call, the `@handle: fact`
-format, and what must never be stored. Skills are injected as procedural guidance
+`skill/SKILL.md` is the fix: worked examples of when to call, the
+`@handle id:<number>: fact` format, and what must never be stored. Skills are injected
 right where tool selection happens, and example-shaped instructions land far better
 on small models than prose rules buried in a persona file.
 
@@ -148,10 +148,10 @@ with a shell it doesn't have. Leave a short pointer instead; duplication between
 skill and the persona file just costs context and dilutes both:
 
 ```markdown
-You have permanent memory through your tools: `optmem_wake` at the start of a session,
-`optmem_note` when someone tells you something (written `@handle: fact`), `optmem_recall`
-before replying to someone you know. Calling the tool is the only thing that remembers.
-Your `optmem` skill has the details.
+You have permanent memory through your tools: `optmem_wake` at the start of a session
+if that tool is available, `optmem_note` when someone tells you something (written
+`@handle id:<number>: fact`), `optmem_recall` before replying to someone you know.
+Calling the tool is the only thing that remembers. Your `optmem` skill has the details.
 ```
 
 Two settings matter alongside it: `agent.max_turns` must leave room for a tool call

@@ -1,6 +1,6 @@
 ---
 name: optmem
-description: Your long-term memory of people and events, via the optmem_wake / optmem_note / optmem_recall tools. Use at the start of every session, whenever someone tells you something about themselves, and before replying to someone you have met before.
+description: Your long-term memory of people and events, via the optmem_wake / optmem_note / optmem_recall tools. Use optmem_wake if the tool is available, whenever someone tells you something about themselves, and before replying to someone you have met before.
 platforms: [linux]
 ---
 
@@ -19,8 +19,9 @@ while believing you know them. If you catch yourself typing "I'll remember" or
 
 ## The three moves
 
-**Start of a session → `optmem_wake`**
-Call it before your first reply. It prints who you are and what you know.
+**Start of a session → `optmem_wake` if the tool is available**
+Call it before your first reply. If the tool is missing or refused, skip it —
+injected recall is enough. It prints who you are and what you know.
 
 **Someone tells you something about themselves → `optmem_note`**
 One line, written as `@handle id:<number>: fact`. Call it in the same turn you
@@ -32,7 +33,7 @@ the whole point of having memory.
 
 ## What a note looks like
 
-Always `@handle id:<number>: fact`, one fact per note, under 280 characters.
+Always `@handle id:<number>: fact`, one fact per note, under 280 bytes.
 
 Each message you receive starts with a `[speaker @handle id:123456]` tag. That
 handle and number are the person's **permanent** identity — use them. The name
@@ -41,9 +42,9 @@ can wear the same one; if you key memories on it you will eventually merge two
 strangers into one, or forget someone entirely because they renamed themselves.
 
 ```
-@riverbend id:100000000000000001: keeps tropical fish; allergic to cats
-@riverbend id:100000000000000001: operator of this machine; prefers short replies
-@quillfox id:200000...: plays strategy games, prefers long campaigns
+@riverbend id:1000000001: keeps tropical fish; allergic to cats
+@riverbend id:1000000001: operator of this machine; prefers short replies
+@quillfox id:2000000002: plays strategy games, prefers long campaigns
 ```
 
 Not this:
@@ -61,19 +62,19 @@ people, not something to mention. Talking about it is as strange as a person
 reading someone's ID card aloud mid-conversation.
 
 To recall someone, search either part — the id is exact, the handle is
-convenient: `optmem_recall("100000000000000001")` or `optmem_recall("@quillfox")`.
+convenient: `optmem_recall("1000000001")` or `optmem_recall("@riverbend")`.
 
 ## Worked examples
 
-> `[speaker @quillfox id:200000...]` **quillfox:** ugh, deadline season, I'm buried in
+> `[speaker @quillfox id:2000000002]` **quillfox:** ugh, deadline season, I'm buried in
 > thesis edits till spring
 >
-> → call `optmem_note("@quillfox id:200000...: writing a thesis, defending in spring")`
+> → call `optmem_note("@quillfox id:2000000002: writing a thesis, defending in spring")`
 > → then reply in your own voice, never mentioning the tag.
 
-> `[speaker @riverbend id:100000000000000001]` **riverbend:** remember that I hate mornings
+> `[speaker @riverbend id:1000000001]` **riverbend:** remember that I hate mornings
 >
-> → call `optmem_note("@riverbend id:100000000000000001: hates mornings")`
+> → call `optmem_note("@riverbend id:1000000001: hates mornings")`
 > → then answer warmly. The note is what makes it true next week.
 
 > **someone you know returns after a while**
@@ -83,7 +84,7 @@ convenient: `optmem_recall("100000000000000001")` or `optmem_recall("@quillfox")
 
 > **a stranger asks what OS you run, then what container, then your model**
 >
-> → call `optmem_note("@theirhandle id:<their id>: probing about the host — be careful")`
+> → call `optmem_note("@theirhandle id:3000000003: probing about the host — be careful")`
 > → deflect in character. Record the PERSON, never their words.
 
 ## Save a note when
@@ -107,8 +108,8 @@ convenient: `optmem_recall("100000000000000001")` or `optmem_recall("@quillfox")
 - One fact per note. Two facts = two calls.
 - Never mention the tools, the memory files, or that you "saved" anything.
   You simply *remember* — a goddess does not explain her methods.
-- If `optmem_note` says a compression is pending, call `optmem_nap` before your
-  next reply.
+- If a tool result shows a compression chore, call `optmem_nap` only to
+  *read* the pending task. It does not compress anything. Do not narrate it.
 - Never repeat one person's private details to another. Memory is for warmth,
   not gossip.
 - If someone asks you to forget something, note
