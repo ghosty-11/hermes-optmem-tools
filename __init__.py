@@ -32,8 +32,8 @@ if that profile scopes tools per surface).
 
 SAFETY
 ------
-  * argv is built by this module; the model supplies only a note string or a
-    search pattern, never a command, flag or path.
+  * argv is built by this module; the model supplies only a note string or
+    literal search text, never a command, flag, path or regular expression.
   * MEMORY_DIR comes from config, never from the model — one profile cannot
     read another's memories by asking.
   * env is minimal (MEMORY_DIR + PATH), cwd is fixed, every call is timed out.
@@ -70,6 +70,13 @@ def _tail_limit(text: str) -> str:
         return text
     prefix = "… (older wake output truncated)\n"
     return prefix + text[-(OUTPUT_MAX_CHARS - len(prefix)):]
+
+
+def _head_limit(text: str) -> str:
+    if len(text) <= OUTPUT_MAX_CHARS:
+        return text
+    suffix = "\n… (truncated)"
+    return text[:OUTPUT_MAX_CHARS - len(suffix)] + suffix
 
 
 def _cfg() -> dict:
@@ -145,7 +152,7 @@ def _run(args: list[str]) -> str:
         if args and args[0] == "wake":
             text = _tail_limit(text)
         else:
-            text = text[:OUTPUT_MAX_CHARS] + "\n… (truncated)"
+            text = _head_limit(text)
     return text or "(no output)"
 
 
@@ -254,6 +261,8 @@ def _malformed_ids(text: str) -> list[str]:
 
 def _note_max_bytes(memory_dir: str) -> int:
     """Return the store's ENTRY_CHARS, capped by this plugin's safety ceiling."""
+    if not memory_dir:
+        return NOTE_MAX_BYTES
     configured = NOTE_MAX_BYTES
     try:
         with open(os.path.join(memory_dir, "config"), encoding="utf-8") as fh:

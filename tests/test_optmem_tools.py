@@ -103,7 +103,9 @@ class TestNoteValidation(unittest.TestCase):
         self.assertIn("Nothing was written", result)
 
     def test_numeric_id_is_not_refused(self):
-        with unittest.mock.patch.object(self.mod, "_run", return_value="Saved as #0.") as run:
+        with unittest.mock.patch.object(
+            self.mod, "_run", return_value="Saved as #0."
+        ) as run:
             result = self.mod._handle_note(
                 {"text": "@riverbend id:1000000001: likes tea"}
             )
@@ -135,7 +137,16 @@ class TestNoteValidation(unittest.TestCase):
         self.assertIn("at most 20 bytes", result)
         run.assert_not_called()
 
-
+    def test_unconfigured_note_does_not_read_relative_config(self):
+        with unittest.mock.patch.object(
+            self.mod, "_memory_dir", return_value=""
+        ), unittest.mock.patch.object(
+            self.mod, "_run", return_value="optmem is not configured for this profile."
+        ), unittest.mock.patch(
+            "builtins.open", side_effect=AssertionError("must not read relative config")
+        ):
+            result = self.mod._handle_note({"text": "likes tea"})
+        self.assertIn("not configured", result)
 
 
 class TestRecallSafety(unittest.TestCase):
@@ -150,6 +161,8 @@ class TestRecallSafety(unittest.TestCase):
             result = self.mod._handle_recall({"pattern": "(a+)+$"})
         self.assertEqual("No match.", result)
         run.assert_called_once_with(["recall", r"\(a\+\)\+\$"])
+
+
 class TestRunDoesNotCreateStore(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -161,13 +174,28 @@ class TestRunDoesNotCreateStore(unittest.TestCase):
         with unittest.mock.patch.object(self.mod, "_cfg", return_value={
             "memory_dir": str(missing),
             "binary": "/bin/true",
-        }), unittest.mock.patch.object(self.mod.os, "makedirs", side_effect=AssertionError(
-            "must not create MEMORY_DIR"
-        )), unittest.mock.patch.object(self.mod.subprocess, "run") as run:
+        }), unittest.mock.patch.object(
+            self.mod.os,
+            "makedirs",
+            side_effect=AssertionError("must not create MEMORY_DIR"),
+        ), unittest.mock.patch.object(self.mod.subprocess, "run") as run:
             result = self.mod._run(["wake"])
         run.assert_not_called()
         self.assertFalse(missing.exists())
         self.assertIn("does not exist", result)
+
+    def test_non_wake_output_stays_within_output_ceiling(self):
+        proc = unittest.mock.Mock(returncode=0, stdout="x" * 9000, stderr="")
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(
+            self.mod, "_cfg", return_value={
+                "memory_dir": tmp,
+                "binary": "/bin/true",
+            }
+        ), unittest.mock.patch.object(
+            self.mod.subprocess, "run", return_value=proc
+        ):
+            result = self.mod._run(["recall", "x"])
+        self.assertLessEqual(len(result), self.mod.OUTPUT_MAX_CHARS)
 
 
 class TestNapIsDisplayOnly(unittest.TestCase):
@@ -176,7 +204,9 @@ class TestNapIsDisplayOnly(unittest.TestCase):
         cls.mod = _load()
 
     def test_nap_handler_runs_bare_nap(self):
-        with unittest.mock.patch.object(self.mod, "_run", return_value="Nothing left to compress.") as run:
+        with unittest.mock.patch.object(
+            self.mod, "_run", return_value="Nothing left to compress."
+        ) as run:
             result = self.mod._handle_nap({})
         self.assertEqual(result, "Nothing left to compress.")
         run.assert_called_once_with(["nap"])
@@ -187,11 +217,12 @@ class TestNapIsDisplayOnly(unittest.TestCase):
         self.assertIn("show", desc)
 
     def test_note_schema_requires_stable_id_format(self):
-        blob = self.mod._NOTE["description"] + self.mod._NOTE["parameters"]["properties"]["text"]["description"]
+        blob = (
+            self.mod._NOTE["description"]
+            + self.mod._NOTE["parameters"]["properties"]["text"]["description"]
+        )
         self.assertIn("id:<number>", blob)
         self.assertNotIn("'@handle: fact'", blob)
-
-
 
 
 class TestRegistrationReporting(unittest.TestCase):
@@ -212,6 +243,8 @@ class TestRegistrationReporting(unittest.TestCase):
         summary = captured.output[-1]
         self.assertIn("registered 3/4 tools", summary)
         self.assertIn("optmem_wake,optmem_recall,optmem_nap", summary)
+
+
 class TestSkillContracts(unittest.TestCase):
     def test_skill_does_not_mandate_wake_when_unavailable(self):
         text = (ROOT / "skill" / "SKILL.md").read_text()
