@@ -36,8 +36,8 @@ Registers four tools under an `optmem` toolset:
 | `optmem_nap` | Show a pending compression task — it does not write one |
 
 The plugin runs the binary itself with a **fixed argv** and the profile's own
-`MEMORY_DIR`. The model supplies only a note string or a search pattern — never a command,
-flag, or path. No shell is involved (`shell=False`, explicit argv).
+`MEMORY_DIR`. The model supplies only note or literal search text — never a command,
+flag, path, or regular expression. No shell is involved (`shell=False`, explicit argv).
 
 ## Safety properties
 
@@ -47,9 +47,12 @@ flag, or path. No shell is involved (`shell=False`, explicit argv).
   resolved per profile automatically.
 - **Minimal env, fixed cwd, hard timeout** on every call.
 - **Notes are sanitized**: whitespace collapsed to one line (OptMem's unit is one line — a
-  pasted block would corrupt the append-only log) and refused if they exceed 280 bytes.
-- **Patterns are validated**: length-capped and compiled before use; a bad pattern returns
-  an error to the model instead of raising.
+  pasted block would corrupt the append-only log) and refused if they exceed either the
+  store's configured `ENTRY_CHARS` limit or 280 bytes.
+- **Recall is literal**: search text is length-capped and regex-escaped before OptMem sees
+  it, so metacharacters cannot create expensive expressions.
+- **Wake is complete before it is capped**: every paginated part is fetched against the
+  same snapshot, then only the most recent configured lines are returned.
 - **Invisible when unconfigured.** A `check_fn` hides all four tools from profiles with no
   `optmem.memory_dir`, so they cost nothing — not even schema tokens.
 
@@ -60,6 +63,22 @@ cp -r . "$HERMES_HOME/plugins/optmem-tools"
 hermes plugins enable optmem-tools
 sudo systemctl restart hermes-gateway     # plugins load at startup
 ```
+
+The gateway loads root plugins. A named profile that also runs in a standalone
+process needs the same plugin under its own home. Use one canonical symlink rather
+than a copy that can drift:
+
+```bash
+PROFILE_HOME="$HERMES_HOME/profiles/PROFILE_NAME"
+mkdir -p "$PROFILE_HOME/plugins"
+test ! -e "$PROFILE_HOME/plugins/optmem-tools"
+ln -s "$HERMES_HOME/plugins/optmem-tools" "$PROFILE_HOME/plugins/optmem-tools"
+hermes -p PROFILE_NAME plugins enable optmem-tools
+```
+
+Repeat that block for each standalone profile that uses OptMem. Profiles without an
+`optmem.memory_dir` remain unaffected because the tool availability check hides the
+schemas.
 
 `plugin.yaml` declares `kind: standalone` — that is the kind for a plugin that
 registers tools. There is **no** `kind: tools`; an invalid kind is demoted to
@@ -86,10 +105,18 @@ fails with `No part 48: the memory has 1 part`, returning nothing on the one cal
 supposed to establish what the agent knows. Worse, nothing about it looks broken: the tool
 reports the error, the agent carries on, and the memory simply never arrives.
 
-This plugin used to forward the value and hit exactly that. It now runs a bare `wake` and
-applies `wake_lines` to the already-rendered output, keeping the most recent lines of
-that document. Memo already budgets the cover via its own `WAKE_LINES`; this option only
-caps what the tool returns.
+The plugin starts with a bare `wake`, follows every continuation part against the
+snapshot id returned by OptMem, and removes the transport headers. Only after the
+complete document reaches the plugin does it apply `wake_lines`, keeping the most
+recent lines. A separate 8,000-character tool-output ceiling also keeps the tail, so
+neither pagination nor output bounding can silently discard the newest memories.
+
+### Note size follows the store
+
+OptMem stores may lower `ENTRY_CHARS` in their own `config` file. The plugin reads
+that value before a write and enforces the lower of it and the plugin's 280-byte
+safety ceiling. This prevents a note from passing plugin validation only to fail in
+the backing store.
 
 ### Disable the built-in memory first — do not run both
 

@@ -37,13 +37,14 @@ SAFETY
   * MEMORY_DIR comes from config, never from the model — one profile cannot
     read another's memories by asking.
   * env is minimal (MEMORY_DIR + PATH), cwd is fixed, every call is timed out.
-  * note text is collapsed to one line and refused if it exceeds 280 bytes:
-    OptMem's unit is ONE line, and a multi-line or over-long note is rejected
-    rather than silently trimmed.
+  * note text is collapsed to one line and refused if it exceeds the store's
+    ENTRY_CHARS limit or 280 bytes, whichever is lower.
   * MEMORY_DIR must already exist (`memo init`). This plugin never creates it.
+  * multi-part wake output is fetched to one stable snapshot before output
+    limits are applied, so recent memories and the awake banner cannot be lost.
   * optmem_nap only shows a pending compression task; it does not write one.
-  * recall patterns are length-capped and rejected if they are not valid
-    regex; a bad pattern returns an error to the model, never an exception.
+  * recall text is length-capped and escaped as a literal regex before it
+    reaches OptMem; user-controlled regex execution is impossible.
 """
 
 from __future__ import annotations
@@ -57,10 +58,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DEFAULT_BINARY = "/var/lib/hermes/.optmem/memo"
-NOTE_MAX_BYTES = 280       # OptMem ENTRY_CHARS: one short line, in bytes
-PATTERN_MAX_CHARS = 120
+NOTE_MAX_BYTES = 280       # Safety ceiling; a store may configure a lower limit
+RECALL_MAX_CHARS = 120
 TIMEOUT_S = 30
-OUTPUT_MAX_CHARS = 8000        # wake output is bounded by design; belt+braces
+OUTPUT_MAX_CHARS = 8000
+WAKE_MAX_PARTS = 128
+
+
+def _tail_limit(text: str) -> str:
+    if len(text) <= OUTPUT_MAX_CHARS:
+        return text
+    prefix = "… (older wake output truncated)\n"
+    return prefix + text[-(OUTPUT_MAX_CHARS - len(prefix)):]
 
 
 def _cfg() -> dict:
@@ -133,7 +142,10 @@ def _run(args: list[str]) -> str:
     if proc.returncode != 0 and not out:
         return f"optmem: '{args[0]}' failed: {err[:400] or 'unknown error'}"
     if len(text) > OUTPUT_MAX_CHARS:
-        text = text[:OUTPUT_MAX_CHARS] + "\n… (truncated)"
+        if args and args[0] == "wake":
+            text = _tail_limit(text)
+        else:
+            text = text[:OUTPUT_MAX_CHARS] + "\n… (truncated)"
     return text or "(no output)"
 
 
@@ -159,40 +171,64 @@ def _mark_housekeeping(out: str) -> str:
 
 
 def _handle_wake(args: dict, **_: Any) -> str:
-    """Load the standing context.
+    """Load every part of one stable wake snapshot, then bound its output."""
+    return _tail_limit(_mark_housekeeping(_wake_output()))
 
-    `wake_lines` is applied HERE, to the output — it is not passed to the binary.
-    OptMem's `wake [N]` argument selects **part N** of a segmented memory, not a
-    line count, so forwarding a value like 48 asks for a part that does not exist
-    and the call fails with `No part 48: the memory has 1 part` — returning
-    nothing, on the one call that is supposed to establish what the agent knows.
-    Nothing surfaces: the tool reports the error text, the agent carries on, and
-    the memory simply never arrives.
 
-    Capping the output ourselves does what the option's name promises and what it
-    was configured for (bounding the tokens a wake costs), and it cannot fail.
-    """
-    return _mark_housekeeping(_wake_output())
+_WAKE_NEXT = re.compile(
+    r"^Not awake yet\. Run: .+\s+wake\s+([1-9]\d*)\s+([1-9]\d*)$"
+)
 
 
 def _wake_output() -> str:
-    out = _run(["wake"])
+    document: list[str] = []
+    command = ["wake"]
+    expected_part = 1
+    snapshot: int | None = None
+
+    for _ in range(WAKE_MAX_PARTS):
+        out = _run(command)
+        rows = out.splitlines()
+        if rows and rows[0].startswith("Your memory, part "):
+            rows.pop(0)
+
+        continuation = _WAKE_NEXT.fullmatch(rows[-1]) if rows else None
+        if continuation is None:
+            document.extend(rows)
+            break
+
+        next_part, next_snapshot = map(int, continuation.groups())
+        if next_part != expected_part + 1:
+            return (
+                "optmem: wake returned an invalid continuation "
+                f"(expected part {expected_part + 1}, got {next_part})."
+            )
+        if snapshot is not None and next_snapshot != snapshot:
+            return "optmem: wake snapshot changed between parts; run wake again."
+
+        rows.pop()
+        document.extend(rows)
+        expected_part = next_part
+        snapshot = next_snapshot
+        command = ["wake", str(next_part), str(next_snapshot)]
+    else:
+        return (
+            f"optmem: wake exceeded {WAKE_MAX_PARTS} parts; "
+            "reduce the store's wake output fragmentation."
+        )
+
+    out = "\n".join(document)
     lines = _cfg().get("wake_lines")
-    if not lines:
-        return out
-    try:
-        limit = int(lines)
-    except (TypeError, ValueError):
-        return out
-    if limit <= 0:
-        return out
-    rows = out.splitlines()
-    if len(rows) <= limit:
-        return out
-    # Keep the MOST RECENT lines: OptMem's log is append-only and chronological,
-    # so the tail is the current picture. Truncating the head would hand the agent
-    # the oldest facts and drop everything learned since.
-    return "\n".join(rows[-limit:])
+    if lines:
+        try:
+            limit = int(lines)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit > 0:
+            rows = out.splitlines()
+            if len(rows) > limit:
+                out = "\n".join(rows[-limit:])
+    return _tail_limit(out) or "(no output)"
 
 
 # A Discord id is digits. People-notes here are written `@handle id:<digits>: fact`,
@@ -216,6 +252,23 @@ def _malformed_ids(text: str) -> list[str]:
             if not m.group(1).strip("<>[]().,;:").isdigit()]
 
 
+def _note_max_bytes(memory_dir: str) -> int:
+    """Return the store's ENTRY_CHARS, capped by this plugin's safety ceiling."""
+    configured = NOTE_MAX_BYTES
+    try:
+        with open(os.path.join(memory_dir, "config"), encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.partition("#")[0]
+                key, separator, value = line.partition("=")
+                if separator and key.strip().upper() == "ENTRY_CHARS":
+                    value = value.strip()
+                    if value.isdigit() and int(value) > 0:
+                        configured = int(value)
+    except (OSError, UnicodeError):
+        pass
+    return min(NOTE_MAX_BYTES, configured)
+
+
 def _handle_note(args: dict, **_: Any) -> str:
     text = str(args.get("text") or "").strip()
     if not text:
@@ -228,28 +281,25 @@ def _handle_note(args: dict, **_: Any) -> str:
                 f"not {bad[0]!r}. Use the real numeric id (e.g. `id:1234567890`), or "
                 "leave `id:` out entirely if you do not have it. Nothing was written.")
     # OptMem's unit is ONE line: collapse whitespace so a pasted block cannot
-    # corrupt the append-only log, then refuse if it exceeds ENTRY_CHARS bytes.
+    # corrupt the append-only log, then enforce the store's configured limit.
     text = " ".join(text.split())
     n = len(text.encode())
-    if n > NOTE_MAX_BYTES:
+    limit = _note_max_bytes(_memory_dir())
+    if n > limit:
         return (
-            f"optmem_note: refused — a memory is at most {NOTE_MAX_BYTES} bytes "
+            f"optmem_note: refused — a memory is at most {limit} bytes "
             f"(this one is {n}). Shorten it. Nothing was written."
         )
     return _run(["note", text])
 
 
 def _handle_recall(args: dict, **_: Any) -> str:
-    pattern = str(args.get("pattern") or "").strip()
-    if not pattern:
+    query = str(args.get("pattern") or "").strip()
+    if not query:
         return "optmem_recall: 'pattern' is required."
-    if len(pattern) > PATTERN_MAX_CHARS:
-        return f"optmem_recall: pattern too long (max {PATTERN_MAX_CHARS})."
-    try:
-        re.compile(pattern)
-    except re.error as e:
-        return f"optmem_recall: not a valid search pattern ({e})."
-    return _run(["recall", pattern])
+    if len(query) > RECALL_MAX_CHARS:
+        return f"optmem_recall: query too long (max {RECALL_MAX_CHARS})."
+    return _run(["recall", re.escape(query)])
 
 
 def _handle_nap(args: dict, **_: Any) -> str:
@@ -292,16 +342,16 @@ _NOTE = {
 _RECALL = {
     "name": "optmem_recall",
     "description": (
-        "Search every memory you have ever recorded. Pass a handle (e.g. "
-        "'@someone') to pull that person's whole history back, or a word to "
-        "find every note mentioning it."
+        "Search every memory you have ever recorded. Pass a literal handle "
+        "(e.g. '@someone'), numeric id, word, or phrase to find every note "
+        "that contains it."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "pattern": {
                 "type": "string",
-                "description": "Handle or word to search for.",
+                "description": "Literal handle, id, word, or phrase to search for.",
             }
         },
         "required": ["pattern"],
@@ -326,12 +376,14 @@ def register(ctx) -> None:
     and the binary being present, so profiles that don't use OptMem never see
     them in their schema (and pay no prompt tokens for them).
     """
-    for schema, handler, emoji in (
+    tools = (
         (_WAKE, _handle_wake, "🌅"),
         (_NOTE, _handle_note, "📝"),
         (_RECALL, _handle_recall, "🔎"),
         (_NAP, _handle_nap, "🌙"),
-    ):
+    )
+    registered: list[str] = []
+    for schema, handler, emoji in tools:
         try:
             ctx.register_tool(
                 name=schema["name"],
@@ -344,4 +396,12 @@ def register(ctx) -> None:
             )
         except Exception:
             logger.exception("optmem: failed to register %s", schema["name"])
-    logger.info("optmem-tools: registered optmem_wake/note/recall/nap")
+        else:
+            registered.append(schema["name"])
+    log = logger.info if len(registered) == len(tools) else logger.warning
+    log(
+        "optmem-tools: registered %d/%d tools: %s",
+        len(registered),
+        len(tools),
+        ",".join(registered) or "none",
+    )

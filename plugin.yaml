@@ -1,13 +1,13 @@
 name: optmem-tools
 label: OptMem (memory tools)
 kind: standalone
-version: 1.1.0
+version: 1.2.0
 description: >
   Exposes OptMem (github.com/VictorTaelin/OptMem) as registered tools —
   optmem_wake / optmem_note / optmem_recall / optmem_nap — so an agent gets
   persistent append-only memory WITHOUT the terminal toolset. The binary is
   invoked with a fixed argv and the profile's own MEMORY_DIR; the model never
-  supplies a command or a path. Profiles without `optmem.memory_dir` in their
-  config never see the tools. Built for a public-facing community chatbot that
-  must not have shell access, 2026-08-05.
+  supplies a command, path, or executable regex. Profiles without an
+  `optmem.memory_dir` config block never see the tools. Built for a public-facing
+  community chatbot that must not have shell access, 2026-08-05.
 author: ghosty
