@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "module": "hermes-optmem-tools",
+  "artifacts": [
+    {"source": "__init__.py", "destination": "plugins/optmem-tools/__init__.py", "kind": "file"},
+    {"source": "plugin.yaml", "destination": "plugins/optmem-tools/plugin.yaml", "kind": "file"}
+  ]
+}
