@@ -192,13 +192,99 @@ people can share one — so notes keyed on a display name eventually merge two
 strangers or lose someone after a rename. Worse, a single-user framing ("the
 user likes X") is meaningless in a room with fifty people.
 
-The skill therefore writes `@handle id:<number>: fact`. On Discord, the
-companion plugin
-[hermes-discord-ambient](https://github.com/ghosty-11/hermes-discord-ambient)
-supplies that identity with `speaker_identity: true`, which prefixes each
-dispatched message with `[speaker @handle id:123]` — the account handle and
-numeric id, neither of which reaches the model otherwise. Without it, an agent
-asked to "record the user id" simply cannot: the id is not in anything it sees.
+The skill writes `@handle id:<number>: fact`. On Discord, the
+[companion plugin](https://github.com/ghosty-11/hermes-discord-ambient)
+places the verified account handle and numeric id in a tagged, request-only
+envelope. The human message remains unchanged in the transcript. A shared
+profile refuses notes without a subject key or notes about anyone other
+than the verified speaker; a refused note neither writes nor spends a
+budget slot.
+
+Do not copy the sample `optmem_wake` instruction into a speaker-scoped companion
+profile. That profile keeps wake and nap as internal housekeeping and restricts
+recall to the verified speaker.
+
+The backend store and scope ledger cannot commit as one transaction. If the
+backend writes a line but the ledger commit fails, the note tool reports an
+unconfirmed save. The line remains quarantined from scoped recall, and a retry
+may append the same line again without using a confirmed ledger budget slot.
+If a save is unconfirmed, inspect the store and ledger before retrying; do not
+claim that the companion remembered the note.
+
+## Reviewing legacy memories (operator-only)
+
+On a `speaker_scoped` (shared/public) profile, recall is audience-scoped: a store
+line reaches a speaker only when the per-profile scope ledger
+(``recall-scope.db`` beside the store) proves it is about them with an audience
+that includes them. Companion-authored notes carry subject and audience
+provenance automatically. Operator-authored notes record provenance but
+stay in the review queue until approved for a numeric speaker or public
+audience. Legacy lines without review stay in the store but cannot reach
+scoped recall.
+
+From the repository root, replace `/path/to/memory` with the profile's
+OptMem store path. Replace `DIGEST_TOKEN` with the exact 16-hex token from `list`.
+
+List unreviewed lines with truncated previews:
+
+```bash
+python3 scripts/optmem_review.py \
+  --memory-dir /path/to/memory list
+```
+
+Show one line in full on your operator terminal:
+
+```bash
+python3 scripts/optmem_review.py \
+  --memory-dir /path/to/memory show DIGEST_TOKEN
+```
+
+For a private approval, verify the numeric subject before recording it:
+
+```bash
+python3 scripts/optmem_review.py \
+  --memory-dir /path/to/memory approve DIGEST_TOKEN --subject id:1234567890
+```
+
+If every speaker may see the reviewed fact, approve a public audience:
+
+```bash
+python3 scripts/optmem_review.py \
+  --memory-dir /path/to/memory approve DIGEST_TOKEN --audience public
+```
+
+Withdraw a fact from all recall:
+
+```bash
+python3 scripts/optmem_review.py \
+  --memory-dir /path/to/memory revoke DIGEST_TOKEN
+```
+
+Rules the script enforces:
+
+- ``--memory-dir`` is **required** — it never guesses or defaults to a live store.
+- If a line has only a handle, private approval requires a verified numeric
+  `--subject id:<digits>`. The script refuses an invisible handle-only
+  private approval instead of recommending a broader public audience.
+- Approvals record **digests only** in the ledger (author, audience, review
+  receipt); the OptMem store remains the single copy of every fact.
+- The original store line is never edited or deleted; review adds a scoped
+  successor, and the memo store stays append-only.
+- Stale refusals: approving a digest that matches no *current* store line (the
+  text changed underneath you, e.g. after a compression) writes nothing.
+- Duplicate and revoked refusals: the same approval cannot be recorded twice,
+  and a revoked fact cannot be re-approved by the script.
+- `revoke DIGEST_TOKEN` writes a digest-only global tombstone and withdraws
+  every currently approved subject for that store line in one transaction.
+  A revoked fact stays unavailable after a handle changes or a later
+  approval names another id. On a scoped companion turn, the note tool
+  refuses to save the exact revoked fact.
+- Nothing here is model-callable: the CLI is not registered as a tool and
+  shares no code path with the gateway.
+
+Migration gating: run ``list`` before activating a speaker-scoped profile on a
+store with history, approve the facts that should survive, and expect recall to
+stay empty for everything else — thinner recall is the honest state, not a bug.
 
 ## Notes
 

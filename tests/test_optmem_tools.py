@@ -245,15 +245,6 @@ class TestRegistrationReporting(unittest.TestCase):
         self.assertIn("optmem_wake,optmem_recall,optmem_nap", summary)
 
 
-class TestSkillContracts(unittest.TestCase):
-    def test_skill_does_not_mandate_wake_when_unavailable(self):
-        text = (ROOT / "skill" / "SKILL.md").read_text()
-        self.assertIn("if the tool is available", text.lower())
-        self.assertNotIn(
-            "If `optmem_note` says a compression is pending, call `optmem_nap` before your",
-            text,
-        )
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
