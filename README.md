@@ -206,10 +206,15 @@ recall to the verified speaker.
 
 The backend store and scope ledger cannot commit as one transaction. If the
 backend writes a line but the ledger commit fails, the note tool reports an
-unconfirmed save. The line remains quarantined from scoped recall, and a retry
-may append the same line again without using a confirmed ledger budget slot.
-If a save is unconfirmed, inspect the store and ledger before retrying; do not
-claim that the companion remembered the note.
+unconfirmed save; scoped recall quarantines that line. A verified retry of
+the same exact text on a memo with `note-once` does not append again.
+Different texts during a persistent ledger fault can still append
+quarantined raw lines without spending confirmed note budget slots. After
+any unconfirmed save, stop issuing companion notes until an operator
+inspects the store and ledger; the tool does not enforce this pause.
+An older memo without `note-once` refuses without writing. Install the
+backend source before the scoped client in a separately authorized rollout.
+Do not claim that an unconfirmed note was remembered.
 
 ## Reviewing legacy memories (operator-only)
 

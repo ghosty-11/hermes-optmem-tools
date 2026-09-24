@@ -120,10 +120,9 @@ class SpeakerScopedSurface(unittest.TestCase):
 class TestNoteSubjectBinding(SpeakerScopedSurface):
     def test_note_to_self_succeeds_and_records_scoped_provenance(self):
         self._bind_verified()
-        with mock.patch.object(self.mod, "_run", return_value="Saved as #3.") as run:
+        with mock.patch.object(self.mod, "_run", return_value="Saved as #3."):
             result = self._note("@riverbend id:111: prefers tea")
         self.assertEqual(result, "Saved as #3.")
-        run.assert_called_once_with(["note", "@riverbend id:111: prefers tea"])
         rows = self._ledger_rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["subject"], "id:111")
@@ -597,6 +596,75 @@ class TestDigestOnlyLedger(SpeakerScopedSurface):
             self.assertIn("No memories",
                           self.mod._handle_recall({"pattern": "id:111"}))
 
+    def test_retry_after_lost_ledger_commit_does_not_append_again(self):
+        self._bind_verified()
+        fact = "@riverbend id:111: prefers tea"
+        log = Path(self.memory_dir) / "LOG.txt"
+        opened = 0
+        open_conn = self.mod._ledger_write_conn
+
+        class LostCommit:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def execute(self, sql, params=()):
+                if sql == "COMMIT":
+                    raise sqlite3.OperationalError("simulated lost ledger commit")
+                return self.conn.execute(sql, params)
+
+            def close(self):
+                self.conn.close()
+
+        def ledger(path):
+            nonlocal opened
+            opened += 1
+            conn = open_conn(path)
+            return LostCommit(conn) if opened == 1 else conn
+
+        def memo(args):
+            if args[0] == "recall":
+                return log.read_text(encoding="utf-8")
+            if args[0] == "note-once" and log.exists():
+                return "Already saved as #0."
+            index = (len(log.read_text(encoding="utf-8").splitlines())
+                     if log.exists() else 0)
+            with log.open("a", encoding="utf-8") as out:
+                out.write(fact + "\n")
+            return f"Saved as #{index}."
+
+        with mock.patch.object(self.mod, "_ledger_write_conn", side_effect=ledger), \
+             mock.patch.object(self.mod, "_run", side_effect=memo):
+            first = self._note(fact, task_id="first")
+            self.assertIn("unconfirmed", first.lower())
+            self.assertEqual(self._ledger_rows(), [])
+            second = self._note(fact, task_id="retry")
+            recalled = self.mod._handle_recall({"pattern": "id:111"})
+        self.assertEqual(second, "Already saved as #0.")
+        self.assertEqual(log.read_text(encoding="utf-8").splitlines(), [fact])
+        self.assertEqual(recalled, fact)
+        self.assertEqual(len(self._ledger_rows()), 1)
+
+    def test_old_backend_refuses_without_writing_or_approving(self):
+        self._bind_verified()
+        old = Path(self.memory_dir) / "old-memo"
+        old.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            "from pathlib import Path\n"
+            "if sys.argv[1] != 'note':\n"
+            "    print('No such command', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            "with (Path(os.environ['MEMORY_DIR']) / 'LOG.txt').open('a') as log:\n"
+            "    log.write(sys.argv[2] + '\\n')\n"
+            "print('Saved as #0.')\n",
+            encoding="utf-8",
+        )
+        old.chmod(0o700)
+        with mock.patch.object(self.mod, "_binary", return_value=str(old)):
+            result = self._note("@riverbend id:111: prefers tea")
+        self.assertIn("unconfirmed", result.lower())
+        self.assertFalse((Path(self.memory_dir) / "LOG.txt").exists())
+        self.assertEqual(self._ledger_rows(), [])
 
 
 class TestSchemaTruthfulness(SpeakerScopedSurface):

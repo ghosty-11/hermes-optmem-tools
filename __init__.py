@@ -384,10 +384,10 @@ def _run(args: list[str]) -> str:
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     text = out if out else err
-    if args and args[0] == "note" and (proc.returncode != 0 or not out):
+    if args and args[0] in ("note", "note-once") and (proc.returncode != 0 or not out):
         reason = (f"memo exited with status {proc.returncode}"
                   if proc.returncode != 0 else "memo gave no save receipt")
-        return (f"optmem: 'note' unconfirmed — {reason}; "
+        return (f"optmem: '{args[0]}' unconfirmed — {reason}; "
                 "inspect the store and scope ledger before retrying.")
     if proc.returncode != 0 and not out:
         return f"optmem: '{args[0]}' failed: {err[:400] or 'unknown error'}"
@@ -703,7 +703,7 @@ def _handle_note(args: dict, task_id: str = "", session_id: str = "", **_: Any) 
     turn_key = str(task_id or "").strip() or (
         f"session:{session_id}" if session_id else "unkeyed")
     return _budgeted_note(memory_dir, turn, text, subject, turn_key,
-                          lambda: _run(["note", text]))
+                          lambda: _run(["note-once", text]))
 
 
 def _handle_recall(args: dict, **_: Any) -> str:
