@@ -119,6 +119,12 @@ _INTERNAL_REFUSAL = (
     "person-scoped recall instead."
 )
 
+_OPERATOR_SCOPE_UNCONFIRMED = (
+    "optmem_note: unconfirmed — the memo store reported a save, but its "
+    "scope ledger receipt is missing. The raw line may be quarantined; "
+    "do not claim it was remembered. Inspect the store and ledger before retrying."
+)
+
 
 def _tail_limit(text: str) -> str:
     if len(text) <= OUTPUT_MAX_CHARS:
@@ -667,6 +673,8 @@ def _handle_note(args: dict, task_id: str = "", session_id: str = "", **_: Any) 
         out = _run(["note", text])
         if not _note_save_failed(out):
             conn = _ledger_write_conn(memory_dir)
+            if conn is None and _profile_restricted():
+                return _OPERATOR_SCOPE_UNCONFIRMED
             if conn is not None:
                 try:
                     subject = _extract_subject(text)
@@ -679,6 +687,12 @@ def _handle_note(args: dict, task_id: str = "", session_id: str = "", **_: Any) 
                          subject, "operator", "operator",
                          "cli", "cli", _now().strftime("%Y-%m-%d"),
                          _now().isoformat()))
+                except sqlite3.Error:
+                    if not _profile_restricted():
+                        raise
+                    logger.warning("optmem: operator note scope ledger write failed",
+                                   exc_info=True)
+                    return _OPERATOR_SCOPE_UNCONFIRMED
                 finally:
                     conn.close()
         return out

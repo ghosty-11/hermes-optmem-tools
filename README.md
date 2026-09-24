@@ -222,10 +222,12 @@ On a `speaker_scoped` (shared/public) profile, recall is audience-scoped: a stor
 line reaches a speaker only when the per-profile scope ledger
 (``recall-scope.db`` beside the store) proves it is about them with an audience
 that includes them. Companion-authored notes carry subject and audience
-provenance automatically. Operator-authored notes record provenance but
-stay in the review queue until approved for a numeric speaker or public
-audience. Legacy lines without review stay in the store but cannot reach
-scoped recall.
+provenance automatically. On a shared profile, operator-authored notes record
+provenance only when the ledger accepts it; a post-write ledger failure reports
+`unconfirmed`, and scoped recall quarantines the raw line. When the ledger
+cannot open, private-profile operator notes keep memo's stock receipt;
+an INSERT error still propagates on that path. Legacy lines without review
+stay in the store but cannot reach scoped recall.
 
 From the repository root, replace `/path/to/memory` with the profile's
 OptMem store path. Replace `DIGEST_TOKEN` with the exact 16-hex token from `list`.

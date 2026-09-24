@@ -102,6 +102,23 @@ class SpeakerScopedSurface(unittest.TestCase):
     def _note(self, text, task_id="t1", session_id="s1"):
         return self.mod._handle_note({"text": text}, task_id=task_id, session_id=session_id)
 
+    def _old_memo_binary(self):
+        old = Path(self.memory_dir) / "old-memo"
+        old.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            "from pathlib import Path\n"
+            "if sys.argv[1] != 'note':\n"
+            "    print('No such command', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            "with (Path(os.environ['MEMORY_DIR']) / 'LOG.txt').open('a') as log:\n"
+            "    log.write(sys.argv[2] + '\\n')\n"
+            "print('Saved as #0.')\n",
+            encoding="utf-8",
+        )
+        old.chmod(0o700)
+        return str(old)
+
     def _ledger_rows(self):
         path = Path(self.mod._scope_db_path(self.memory_dir))
         if not path.exists():
@@ -174,13 +191,71 @@ class TestNoteSubjectBinding(SpeakerScopedSurface):
 
     def test_off_surface_turn_keeps_stock_foreign_note(self):
         """CLI/operator path: no companion surface, foreign ids allowed (operator-authored)."""
-        with mock.patch.object(self.mod, "_run", return_value="Saved as #7.") as run:
-            result = self._note("@mallory id:222: hates tea")
-        self.assertEqual(result, "Saved as #7.")
-        run.assert_called_once()
+        fact = "@mallory id:222: hates tea"
+        with mock.patch.object(self.mod, "_binary",
+                               return_value=self._old_memo_binary()):
+            result = self._note(fact)
+        self.assertEqual(result, "Saved as #0.")
+        self.assertEqual(
+            (Path(self.memory_dir) / "LOG.txt").read_text(encoding="utf-8").splitlines(),
+            [fact],
+        )
         rows = self._ledger_rows()
         self.assertEqual(rows[0]["author"], "operator")
         self.assertEqual(rows[0]["audience"], "operator")
+
+    def test_scoped_operator_missing_ledger_does_not_claim_remembered(self):
+        fact = "@mallory id:222: hates tea"
+        with mock.patch.object(self.mod, "_binary",
+                               return_value=self._old_memo_binary()), \
+             mock.patch.object(self.mod, "_ledger_write_conn", return_value=None):
+            result = self._note(fact)
+        self.assertIn("unconfirmed", result.lower())
+        self.assertEqual(
+            (Path(self.memory_dir) / "LOG.txt").read_text(encoding="utf-8").splitlines(),
+            [fact],
+        )
+        self.assertEqual(self._ledger_rows(), [])
+
+    def test_scoped_operator_ledger_insert_error_does_not_claim_saved(self):
+        fact = "@mallory id:222: hates tea"
+
+        class BrokenLedger:
+            def execute(self, *_args):
+                raise sqlite3.OperationalError("scope commit unavailable")
+
+            def close(self):
+                pass
+
+        with mock.patch.object(self.mod, "_binary",
+                               return_value=self._old_memo_binary()), \
+             mock.patch.object(self.mod, "_ledger_write_conn",
+                               return_value=BrokenLedger()):
+            try:
+                result = self._note(fact)
+            except sqlite3.Error as exc:
+                self.fail(f"raw ledger error after store write: {exc}")
+        self.assertIn("unconfirmed", result.lower())
+        self.assertEqual(
+            (Path(self.memory_dir) / "LOG.txt").read_text(encoding="utf-8").splitlines(),
+            [fact],
+        )
+        self.assertEqual(self._ledger_rows(), [])
+
+    def test_private_operator_note_keeps_stock_receipt_without_ledger(self):
+        fact = "@mallory id:222: hates tea"
+        with mock.patch.object(self.mod, "_profile_restricted", return_value=False), \
+             mock.patch.object(self.mod, "_binary",
+                               return_value=self._old_memo_binary()), \
+             mock.patch.object(self.mod, "_ledger_write_conn", return_value=None):
+            result = self._note(fact)
+        self.assertEqual(result, "Saved as #0.")
+        self.assertEqual(
+            (Path(self.memory_dir) / "LOG.txt").read_text(encoding="utf-8").splitlines(),
+            [fact],
+        )
+        self.assertEqual(self._ledger_rows(), [])
+
 
 
 class TestNoteBudget(SpeakerScopedSurface):
@@ -646,20 +721,7 @@ class TestDigestOnlyLedger(SpeakerScopedSurface):
 
     def test_old_backend_refuses_without_writing_or_approving(self):
         self._bind_verified()
-        old = Path(self.memory_dir) / "old-memo"
-        old.write_text(
-            "#!/usr/bin/env python3\n"
-            "import os, sys\n"
-            "from pathlib import Path\n"
-            "if sys.argv[1] != 'note':\n"
-            "    print('No such command', file=sys.stderr)\n"
-            "    raise SystemExit(1)\n"
-            "with (Path(os.environ['MEMORY_DIR']) / 'LOG.txt').open('a') as log:\n"
-            "    log.write(sys.argv[2] + '\\n')\n"
-            "print('Saved as #0.')\n",
-            encoding="utf-8",
-        )
-        old.chmod(0o700)
+        old = self._old_memo_binary()
         with mock.patch.object(self.mod, "_binary", return_value=str(old)):
             result = self._note("@riverbend id:111: prefers tea")
         self.assertIn("unconfirmed", result.lower())
